@@ -1,4 +1,4 @@
-// Tiene l'app disponibile anche senza rete. I dati li gestisce Firestore.
+// Tiene l'app disponibile anche senza rete. I dati li gestisce Firestore. (v5)
 const CACHE = "spese-casa-v5";
 const SHELL = ["./", "index.html", "style.css?v=5", "app.js?v=5", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
