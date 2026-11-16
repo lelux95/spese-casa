@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Spese Casa</title>
+  <meta name="theme-color" content="#111413">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Spese Casa">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+  <!-- Accesso -->
+  <section id="login" class="hidden">
+    <div class="login-box">
+      <img src="icons/icon-192.png" alt="" class="login-logo">
+      <h1>Spese Casa</h1>
+      <p class="muted">Le spese di casa, condivise e sempre aggiornate.</p>
+      <button id="btn-login" class="btn primary big">Accedi con Google</button>
+      <p id="login-error" class="error"></p>
+    </div>
+  </section>
+
+  <!-- Accesso negato -->
+  <section id="denied" class="hidden">
+    <div class="login-box">
+      <img src="icons/icon-192.png" alt="" class="login-logo">
+      <h2>Accesso non autorizzato</h2>
+      <p class="muted">L'account <b id="denied-email"></b> non è abilitato.<br>Chiedi a Daniele di aggiungerlo dalle impostazioni dell'app.</p>
+      <button id="btn-denied-out" class="btn">Esci e cambia account</button>
+    </div>
+  </section>
+
+  <!-- App -->
+  <section id="main" class="hidden">
+    <header class="topbar">
+      <div>
+        <div class="title" id="page-title">Spese Casa</div>
+        <div class="small muted" id="sync">Connessione…</div>
+      </div>
+      <button id="btn-account" class="avatar" aria-label="Impostazioni"></button>
+    </header>
+
+    <main id="view"></main>
+
+    <button id="fab" class="fab" aria-label="Nuova spesa">+</button>
+
+    <nav class="bottomnav">
+      <button data-tab="home" class="active"><span>🏠</span>Home</button>
+      <button data-tab="spese"><span>🧾</span>Spese</button>
+      <button data-tab="riepilogo"><span>📊</span>Riepilogo</button>
+      <button data-tab="ricorrenti"><span>🔁</span>Ricorrenti</button>
+    </nav>
+  </section>
+
+  <!-- Pannello a comparsa -->
+  <div id="sheet-bg" class="sheet-bg hidden"></div>
+  <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true"></div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="app.js?v=1"></script>
+  <script>
+    if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
+  </script>
+</body>
+</html>
