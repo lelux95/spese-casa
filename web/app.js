@@ -273,13 +273,7 @@ function scadenze() {
 function viewHome() {
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth() + 1;
-  const [py, pm] = ymAdd(y, m, -1);
   const tot = totale(speseMese(y, m));
-  const totPrec = totale(speseMese(py, pm));
-  // Media degli ultimi 12 mesi completi
-  let somma = 0;
-  for (let i = 1; i <= 12; i++) { const [a, b] = ymAdd(y, m, -i); somma += totale(speseMese(a, b)); }
-  const media = somma / 12;
   const oggi = today();
 
   const sc = scadenze();
@@ -308,17 +302,11 @@ function viewHome() {
     : `<div class="empty">Nessuna spesa questo mese</div>`;
 
   const ultime = [...spese].sort((a, b) => b.data.localeCompare(a.data) || (b.creataIl?.seconds || 0) - (a.creataIl?.seconds || 0)).slice(0, 5);
-  const delta = totPrec ? ((tot - totPrec) / totPrec) * 100 : null;
 
   return `
     <div class="card">
       <h3>Speso a ${MESI[m - 1]}</h3>
       <div class="big-total">${eur(tot)}</div>
-      <div class="kpis">
-        <div class="kpi"><span class="small muted">${MESI[pm - 1]}</span><b>${eur0(totPrec)}</b></div>
-        <div class="kpi"><span class="small muted">Media ultimi 12 mesi</span><b>${eur0(media)}</b></div>
-      </div>
-      ${delta !== null && tot ? `<div class="small muted" style="margin-top:8px">Finora ${delta >= 0 ? "+" : ""}${delta.toFixed(0)}% rispetto a tutto ${MESI[pm - 1]}</div>` : ""}
     </div>
     <div class="card">
       <h3>In scadenza${daPagare.length ? `<span class="count">${daPagare.length}</span>` : ""}</h3>
@@ -401,13 +389,54 @@ function viewRiepilogo() {
       ${per.length ? per.map((x) => {
         const p = prevMap.get(x.cat.id) || 0;
         const d = x.tot - p;
-        return `<div class="cat-row" data-rcat="${esc(x.cat.id)}">
+        const isAbb = x.cat.id === "abbonamenti";
+        return `<div class="cat-row" ${isAbb ? 'data-abbtoggle="1"' : `data-rcat="${esc(x.cat.id)}"`}>
           <div class="row between"><span>${esc(x.cat.icona)} ${esc(x.cat.nome)}</span><b>${eur(x.tot)}</b></div>
           <div class="bar"><i style="width:${(x.tot / max) * 100}%;background:${esc(x.cat.colore)}"></i></div>
           <div class="row between small muted" style="margin-top:4px"><span>${tot ? ((x.tot / tot) * 100).toFixed(1) : 0}% del totale</span>
-          <span>${prevLbl}: ${eur(p)} ${p || x.tot ? `<span class="${d > 0 ? "neg" : d < 0 ? "pos" : ""}">(${d > 0 ? "+" : ""}${eur0(d)})</span>` : ""}</span></div></div>`;
+          <span>${prevLbl}: ${eur(p)} ${p || x.tot ? `<span class="${d > 0 ? "neg" : d < 0 ? "pos" : ""}">(${d > 0 ? "+" : ""}${eur0(d)})</span>` : ""}</span></div>
+          ${isAbb ? `<div class="small" style="margin-top:6px;color:var(--accent);font-weight:700">${riep.abbAperto ? "▲ Nascondi dettaglio" : "▼ Dettaglio abbonamenti e costo annuo"}</div>` : ""}</div>
+          ${isAbb && riep.abbAperto ? dettaglioAbbonamenti(arr, label) : ""}`;
       }).join("") : `<div class="empty">Nessuna spesa in questo periodo</div>`}
     </div>`;
+}
+
+// Dettaglio per abbonamento: speso nel periodo, prezzo attuale e costo annuo
+function dettaglioAbbonamenti(arrPeriodo, label) {
+  const ricAbb = ricorrenti.filter((r) => r.categoria === "abbonamenti");
+  const chiave = (s) => {
+    if (s.ricorrenteId) { const r = ricorrenti.find((x) => x.id === s.ricorrenteId); if (r) return r.nome; }
+    const d = (s.descrizione || "Altro").trim();
+    const r = ricAbb.find((x) => d.toLowerCase().startsWith(x.nome.toLowerCase()));
+    return r ? r.nome : d;
+  };
+  const oggi = today();
+  const unAnnoFa = iso(new Date(new Date().setFullYear(new Date().getFullYear() - 1)));
+  const gruppi = new Map();
+  const g = (k) => { if (!gruppi.has(k)) gruppi.set(k, { nome: k, periodo: 0, ultimi12: 0, ric: ricAbb.find((r) => r.nome === k) }); return gruppi.get(k); };
+  for (const r of ricAbb) if (r.attiva) g(r.nome);
+  for (const s of spese) {
+    if (s.categoria !== "abbonamenti") continue;
+    const x = g(chiave(s));
+    if (s.data > unAnnoFa && s.data <= oggi) x.ultimi12 += Number(s.importo) || 0;
+  }
+  for (const s of arrPeriodo) if (s.categoria === "abbonamenti") g(chiave(s)).periodo += Number(s.importo) || 0;
+  const righe = [...gruppi.values()].map((x) => {
+    const attivo = x.ric && x.ric.attiva && haImporto(x.ric);
+    const annuo = attivo ? (Number(x.ric.importo) * 12) / (x.ric.frequenza || 1) : x.ultimi12;
+    const prezzo = attivo ? `${eur(x.ric.importo)} ${x.ric.frequenza === 12 ? "/anno" : x.ric.frequenza === 1 ? "/mese" : "ogni " + x.ric.frequenza + " mesi"}` : "non ricorrente";
+    return { ...x, annuo, prezzo };
+  }).sort((a, b) => b.annuo - a.annuo);
+  const totAnnuo = righe.reduce((s, x) => s + x.annuo, 0);
+  const max = Math.max(1, ...righe.map((x) => x.annuo));
+  return `<div style="background:var(--surface2);border-radius:14px;padding:4px 12px;margin:4px 0 8px">
+    ${righe.map((x) => `<div style="padding:9px 0;border-bottom:1px solid var(--line)">
+      <div class="row between"><b>${esc(x.nome)}</b><b>${eur(x.annuo)}<span class="muted small" style="font-weight:600"> /anno</span></b></div>
+      <div class="bar"><i style="width:${(x.annuo / max) * 100}%;background:#e56fb0"></i></div>
+      <div class="row between small muted" style="margin-top:4px"><span>${esc(x.prezzo)}</span><span>${label}: ${eur(x.periodo)}</span></div></div>`).join("")}
+    <div class="row between" style="padding:10px 0"><span class="muted">Totale abbonamenti all'anno</span><b>${eur(totAnnuo)}</b></div>
+    <button class="linkbtn" data-rcat="abbonamenti">Vedi le singole spese ›</button>
+  </div>`;
 }
 
 function viewRicorrenti() {
@@ -516,7 +545,7 @@ function apriVersamento(r = null) {
 
 // ---------- Click nella vista ----------
 $("#view").addEventListener("click", (e) => {
-  const t = e.target.closest("[data-spesa],[data-paga],[data-salta],[data-cat],[data-goto],[data-fnav],[data-fmode],[data-fcat],[data-rmode],[data-rnav],[data-rcat],[data-rmese],[data-ric],[data-risp],[data-snav],#btn-new-ric");
+  const t = e.target.closest("[data-spesa],[data-paga],[data-salta],[data-cat],[data-goto],[data-fnav],[data-fmode],[data-fcat],[data-rmode],[data-rnav],[data-rcat],[data-rmese],[data-ric],[data-risp],[data-snav],[data-abbtoggle],#btn-new-ric");
   if (!t) return;
   const d = t.dataset;
   if (d.spesa) apriSpesa(spese.find((s) => s.id === d.spesa));
@@ -529,6 +558,7 @@ $("#view").addEventListener("click", (e) => {
   else if (d.fcat !== undefined) { filtro.cat = d.fcat || null; render(); }
   else if (d.rmode) { riep.mode = d.rmode; render(); }
   else if (d.rnav) { if (riep.mode === "mese") [riep.y, riep.m] = ymAdd(riep.y, riep.m, Number(d.rnav)); else riep.y += Number(d.rnav); render(); }
+  else if (d.abbtoggle) { riep.abbAperto = !riep.abbAperto; render(); }
   else if (d.rmese) { riep.mode = "mese"; riep.m = Number(d.rmese); render(); }
   else if (d.rcat) { Object.assign(filtro, { y: riep.y, m: riep.mode === "mese" ? riep.m : null, cat: d.rcat }); tab = "spese"; render(); }
   else if (d.risp) apriVersamento(risparmi.find((r) => r.id === d.risp));
