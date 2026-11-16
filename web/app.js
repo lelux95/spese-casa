@@ -307,6 +307,7 @@ function viewHome() {
     <div class="card">
       <h3>Speso a ${MESI[m - 1]}</h3>
       <div class="big-total">${eur(tot)}</div>
+      ${previsteHtml(y, m, tot)}
     </div>
     <div class="card">
       <h3>In scadenza${daPagare.length ? `<span class="count">${daPagare.length}</span>` : ""}</h3>
@@ -320,6 +321,37 @@ function viewHome() {
       <div class="row between"><h3 style="margin:0">Ultime spese</h3><button class="linkbtn" data-goto="spese">Vedi tutte</button></div>
       <div class="list">${ultime.length ? ultime.map((s) => itemSpesa(s, true)).join("") : `<div class="empty">Ancora nessuna spesa. Tocca + per aggiungerne una.</div>`}</div>
     </div>`;
+}
+
+// Spese ricorrenti ancora previste da oggi a fine mese (non ancora registrate)
+function previsteHtml(y, m, tot) {
+  const oggi = today();
+  const fine = iso(new Date(y, m, 0));
+  const voci = [];
+  let bollette = 0;
+  for (const r of ricorrenti) {
+    if (!r.attiva || !r.prossima) continue;
+    let d = r.prossima, giri = 0;
+    while (d <= fine && giri < 40) {
+      // Le automatiche gia' passate vengono registrate da sole: contano solo quelle future
+      if (!(r.automatica && d <= oggi)) {
+        if (haImporto(r)) voci.push({ nome: r.nome, importo: Number(r.importo), data: d });
+        else bollette++;
+      }
+      d = addMonths(d, r.frequenza || 1, r.giorno);
+      giri++;
+    }
+  }
+  if (!voci.length && !bollette) return `<div class="small muted" style="margin-top:6px">Nessun'altra spesa ricorrente prevista entro fine mese</div>`;
+  voci.sort((a, b) => a.data.localeCompare(b.data));
+  const prev = voci.reduce((s, v) => s + v.importo, 0);
+  const elenco = voci.map((v) => `${esc(v.nome)} ${eur(v.importo)}`).join(" · ");
+  const boll = bollette ? `${voci.length ? " · " : ""}+ ${bollette} ${bollette === 1 ? "bolletta" : "bollette"} da fattura` : "";
+  return `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+    <div class="row between"><span class="muted">Ancora previste entro il ${fmtDate(fine)}</span><b>${eur(prev)}</b></div>
+    <div class="small muted" style="margin-top:4px">${elenco}${boll}</div>
+    <div class="row between" style="margin-top:8px"><span class="muted">Totale stimato a fine mese</span><b>${eur(tot + prev)}${bollette ? " +" : ""}</b></div>
+  </div>`;
 }
 
 function raggruppa(arr) {
