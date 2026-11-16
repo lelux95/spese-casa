@@ -475,6 +475,7 @@ function viewRicorrenti() {
   const arr = [...ricorrenti].sort((a, b) => (b.attiva - a.attiva) || (a.prossima || "").localeCompare(b.prossima || ""));
   const mensile = arr.filter((r) => r.attiva && haImporto(r)).reduce((s, r) => s + (Number(r.importo) || 0) / (r.frequenza || 1), 0);
   return `
+    <button class="linkbtn" data-back-imp="1">‹ Impostazioni</button>
     <div class="card">
       <h3>Costo ricorrente stimato</h3>
       <div class="big-total">${eur(mensile)}<span class="muted" style="font-size:16px;font-weight:600"> / mese</span></div>
@@ -577,7 +578,7 @@ function apriVersamento(r = null) {
 
 // ---------- Click nella vista ----------
 $("#view").addEventListener("click", (e) => {
-  const t = e.target.closest("[data-spesa],[data-paga],[data-salta],[data-cat],[data-goto],[data-fnav],[data-fmode],[data-fcat],[data-rmode],[data-rnav],[data-rcat],[data-rmese],[data-ric],[data-risp],[data-snav],[data-abbtoggle],#btn-new-ric");
+  const t = e.target.closest("[data-spesa],[data-paga],[data-salta],[data-cat],[data-goto],[data-fnav],[data-fmode],[data-fcat],[data-rmode],[data-rnav],[data-rcat],[data-rmese],[data-ric],[data-risp],[data-snav],[data-abbtoggle],[data-back-imp],#btn-new-ric");
   if (!t) return;
   const d = t.dataset;
   if (d.spesa) apriSpesa(spese.find((s) => s.id === d.spesa));
@@ -590,6 +591,7 @@ $("#view").addEventListener("click", (e) => {
   else if (d.fcat !== undefined) { filtro.cat = d.fcat || null; render(); }
   else if (d.rmode) { riep.mode = d.rmode; render(); }
   else if (d.rnav) { if (riep.mode === "mese") [riep.y, riep.m] = ymAdd(riep.y, riep.m, Number(d.rnav)); else riep.y += Number(d.rnav); render(); }
+  else if (d.backImp) { tab = "home"; render(); apriImpostazioni(); }
   else if (d.abbtoggle) { riep.abbAperto = !riep.abbAperto; render(); }
   else if (d.rmese) { riep.mode = "mese"; riep.m = Number(d.rmese); render(); }
   else if (d.rcat) { Object.assign(filtro, { y: riep.y, m: riep.mode === "mese" ? riep.m : null, cat: d.rcat }); tab = "spese"; render(); }
@@ -783,6 +785,7 @@ function apriImpostazioni() {
     </div>
     <label class="check"><input type="checkbox" id="s-tema" ${light ? "checked" : ""}><div><b>Tema chiaro</b></div></label>
     <div class="card"><h3>Gestione</h3>
+      <div class="set-row" data-s="ric"><span class="grow">🔁 Spese ricorrenti</span><span class="muted">${ricorrenti.filter((r) => r.attiva).length} ›</span></div>
       <div class="set-row" data-s="cat"><span class="grow">🏷️ Categorie</span><span class="muted">${categorie.length} ›</span></div>
       <div class="set-row" data-s="conti"><span class="grow">💳 Conti di pagamento</span><span class="muted">${(impostazioni.conti || []).length} ›</span></div>
       ${isOwner() ? `<div class="set-row" data-s="membri"><span class="grow">👥 Persone con accesso</span><span class="muted">${membri.length + 1} ›</span></div>` : ""}
@@ -793,7 +796,7 @@ function apriImpostazioni() {
   $("#s-tema").addEventListener("change", (e) => { localStorage.setItem("tema", e.target.checked ? "chiaro" : "scuro"); applyTheme(); });
   $("#s-out").addEventListener("click", () => { closeSheet(); signOut(auth); });
   $("#sheet").querySelectorAll("[data-s]").forEach((el) => el.addEventListener("click", () => {
-    ({ cat: apriCategorie, conti: apriConti, membri: apriMembri, export: esportaExcel })[el.dataset.s]();
+    ({ ric: () => { closeSheet(); tab = "ricorrenti"; render(); window.scrollTo(0, 0); }, cat: apriCategorie, conti: apriConti, membri: apriMembri, export: esportaExcel })[el.dataset.s]();
   }));
 }
 

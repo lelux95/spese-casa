@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <!-- Accesso -->
@@ -52,7 +52,6 @@
       <button data-tab="home" class="active"><span>🏠</span>Home</button>
       <button data-tab="spese"><span>🧾</span>Spese</button>
       <button data-tab="riepilogo"><span>📊</span>Riepilogo</button>
-      <button data-tab="ricorrenti"><span>🔁</span>Ricorrenti</button>
       <button data-tab="risparmi"><span>💰</span>Risparmi</button>
     </nav>
   </section>
@@ -63,7 +62,7 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="app.js?v=4"></script>
+  <script type="module" src="app.js?v=5"></script>
   <script>
     if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js"));
   </script>
