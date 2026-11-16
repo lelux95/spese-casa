@@ -1,6 +1,6 @@
 // Tiene l'app disponibile anche senza rete. I dati li gestisce Firestore.
-const CACHE = "spese-casa-v1";
-const SHELL = ["./", "index.html", "style.css?v=1", "app.js?v=1", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
+const CACHE = "spese-casa-v2";
+const SHELL = ["./", "index.html", "style.css?v=2", "app.js?v=2", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -27,6 +27,7 @@ const db = initializeFirestore(app, { localCache: persistentLocalCache({ tabMana
 const C_SPESE = collection(db, "spese");
 const C_RIC = collection(db, "ricorrenti");
 const C_CAT = collection(db, "categorie");
+const C_RISP = collection(db, "risparmi");
 const D_IMP = doc(db, "impostazioni", "generali");
 const D_MEMBRI = doc(db, "config", "membri");
 
@@ -79,7 +80,8 @@ let ricorrenti = [];
 let categorie = [];
 let impostazioni = { conti: ["Revolut", "BCC"] };
 let membri = [];
-const loaded = { spese: false, ric: false, cat: false };
+let risparmi = [];
+const loaded = { spese: false, ric: false, cat: false, risp: false };
 let unsubs = [];
 let tab = "home";
 const filtro = { y: new Date().getFullYear(), m: new Date().getMonth() + 1, cat: null, q: "" };
@@ -172,6 +174,11 @@ function listen() {
     if (!categorie.length && !snap.metadata.fromCache) creaCategorieBase();
     render();
   }, onErr));
+  unsubs.push(onSnapshot(C_RISP, (snap) => {
+    risparmi = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    loaded.risp = true;
+    render();
+  }, onErr));
   unsubs.push(onSnapshot(D_IMP, (s) => { if (s.exists()) impostazioni = { conti: ["Revolut", "BCC"], ...s.data() }; }, () => {}));
   unsubs.push(onSnapshot(D_MEMBRI, (s) => { membri = s.exists() ? (s.data().emails || []) : []; }, () => {}));
 }
@@ -192,7 +199,7 @@ async function elaboraAutomatiche() {
     const oggi = today();
     let nuove = 0;
     for (const r of ricorrenti) {
-      if (!r.attiva || !r.automatica || !r.prossima || r.prossima > oggi) continue;
+      if (!r.attiva || !r.automatica || !haImporto(r) || !r.prossima || r.prossima > oggi) continue;
       let data = r.prossima;
       let giri = 0;
       while (data <= oggi && giri < 36) {
@@ -225,21 +232,24 @@ function nuovaSpesaDaRicorrente(r, data, importo) {
 
 // ---------- Rendering ----------
 document.querySelectorAll(".bottomnav button").forEach((b) => b.addEventListener("click", () => { tab = b.dataset.tab; render(); window.scrollTo(0, 0); }));
-$("#fab").addEventListener("click", () => apriSpesa());
+$("#fab").addEventListener("click", () => (tab === "risparmi" ? apriVersamento() : apriSpesa()));
 $("#btn-account").addEventListener("click", apriImpostazioni);
 
 function render() {
   if (!user) return;
   document.querySelectorAll(".bottomnav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-  $("#page-title").textContent = { home: "Spese Casa", spese: "Spese", riepilogo: "Riepilogo", ricorrenti: "Ricorrenti" }[tab];
+  $("#page-title").textContent = { home: "Spese Casa", spese: "Spese", riepilogo: "Riepilogo", ricorrenti: "Ricorrenti", risparmi: "Risparmi" }[tab];
+  $("#fab").setAttribute("aria-label", tab === "risparmi" ? "Nuovo versamento" : "Nuova spesa");
   const v = $("#view");
   if (!loaded.spese || !loaded.cat) { v.innerHTML = `<div class="empty">Caricamento…</div>`; return; }
   if (tab === "home") v.innerHTML = viewHome();
   if (tab === "spese") v.innerHTML = viewSpese();
   if (tab === "riepilogo") v.innerHTML = viewRiepilogo();
   if (tab === "ricorrenti") v.innerHTML = viewRicorrenti();
+  if (tab === "risparmi") v.innerHTML = viewRisparmi();
 }
 
+const haImporto = (r) => r.importo !== null && r.importo !== undefined && r.importo !== "" && Number(r.importo) > 0;
 const totale = (arr) => arr.reduce((s, x) => s + (Number(x.importo) || 0), 0);
 const speseMese = (y, m) => spese.filter((s) => ym(s.data) === `${y}-${pad(m)}`);
 const speseAnno = (y) => spese.filter((s) => s.data.startsWith(`${y}-`));
@@ -280,11 +290,11 @@ function viewHome() {
     const quando = gg < 0 ? `<span class="badge late">scaduta da ${-gg} gg</span>` : gg === 0 ? `<span class="badge warn">oggi</span>` : `<span class="badge${gg <= 3 ? " warn" : ""}">tra ${gg} gg</span>`;
     const acts = r.automatica
       ? `<span class="badge auto">addebito automatico</span>`
-      : `<div class="acts"><button class="btn sm primary" data-paga="${esc(r.id)}">Pagata</button><button class="btn sm" data-salta="${esc(r.id)}">Salta</button></div>`;
+      : `<div class="acts"><button class="btn sm primary" data-paga="${esc(r.id)}">${haImporto(r) ? "Pagata" : "Registra"}</button><button class="btn sm" data-salta="${esc(r.id)}">Salta</button></div>`;
     return `<div class="due">
       <div class="ico" style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:${esc(c.colore)}22">${esc(c.icona)}</div>
       <div class="grow" style="min-width:0"><div style="font-weight:650">${esc(r.nome)}</div>
-        <div class="small muted">${fmtDate(r.prossima)} · ${eur(r.importo)}${r.importo && !r.automatica ? " circa" : ""} ${quando}</div></div>
+        <div class="small muted">${fmtDate(r.prossima)} · ${haImporto(r) ? eur(r.importo) : "importo da fattura"} ${quando}</div></div>
       ${acts}</div>`;
   }).join("") : `<div class="empty">Nessuna scadenza nei prossimi ${GIORNI_AVVISO} giorni 🎉</div>`;
 
@@ -402,30 +412,111 @@ function viewRiepilogo() {
 
 function viewRicorrenti() {
   const arr = [...ricorrenti].sort((a, b) => (b.attiva - a.attiva) || (a.prossima || "").localeCompare(b.prossima || ""));
-  const mensile = arr.filter((r) => r.attiva).reduce((s, r) => s + (Number(r.importo) || 0) / (r.frequenza || 1), 0);
+  const mensile = arr.filter((r) => r.attiva && haImporto(r)).reduce((s, r) => s + (Number(r.importo) || 0) / (r.frequenza || 1), 0);
   return `
     <div class="card">
       <h3>Costo ricorrente stimato</h3>
       <div class="big-total">${eur(mensile)}<span class="muted" style="font-size:16px;font-weight:600"> / mese</span></div>
-      <div class="small muted">${eur(mensile * 12)} l'anno · le spese automatiche si registrano da sole alla scadenza, le altre le confermi tu da Home</div>
+      <div class="small muted">${eur(mensile * 12)} l'anno, escluse le bollette a importo variabile · le spese automatiche si registrano da sole, le altre le confermi tu da Home</div>
     </div>
     <button class="btn primary block" id="btn-new-ric">+ Nuova spesa ricorrente</button>
-    <div class="card"><div class="list">
-      ${arr.length ? arr.map((r) => {
+    ${[["Spese fisse", (r) => haImporto(r) && r.categoria !== "abbonamenti"], ["Abbonamenti", (r) => haImporto(r) && r.categoria === "abbonamenti"], ["Bollette · promemoria", (r) => !haImporto(r)]]
+      .map(([titolo, f]) => [titolo, arr.filter(f)]).filter(([, g]) => g.length).map(([titolo, g]) => `
+    <div class="card"><h3>${titolo}</h3><div class="list">
+      ${g.map((r) => {
         const c = catById(r.categoria);
         return `<div class="item" data-ric="${esc(r.id)}" style="${r.attiva ? "" : "opacity:.5"}">
           <div class="ico" style="background:${esc(c.colore)}22">${esc(c.icona)}</div>
           <div class="txt"><div class="t">${esc(r.nome)}</div>
             <div class="s">${FREQ[r.frequenza] || "Ogni " + r.frequenza + " mesi"} · ${r.attiva ? "prossima " + (r.prossima ? fmtDate(r.prossima) : "—") : "in pausa"}</div>
-            <div style="margin-top:3px">${r.automatica ? '<span class="badge auto">automatica</span>' : '<span class="badge">da confermare</span>'} ${r.conto ? `<span class="badge">${esc(r.conto)}</span>` : ""}</div></div>
-          <div class="amt">${eur(r.importo)}</div></div>`;
-      }).join("") : `<div class="empty">Nessuna spesa ricorrente</div>`}
-    </div></div>`;
+            <div style="margin-top:3px">${r.automatica ? '<span class="badge auto">automatica</span>' : haImporto(r) ? '<span class="badge">da confermare</span>' : '<span class="badge warn">promemoria</span>'} ${r.conto ? `<span class="badge">${esc(r.conto)}</span>` : ""}</div></div>
+          <div class="amt">${haImporto(r) ? eur(r.importo) : '<span class="muted small">da fattura</span>'}</div></div>`;
+      }).join("")}
+    </div></div>`).join("") || `<div class="card"><div class="empty">Nessuna spesa ricorrente</div></div>`}`;
+}
+
+// ---------- Risparmi ----------
+const nomeDa = (email) => (!email ? "" : email === OWNER ? "Daniele" : email.split("@")[0].split(/[._]/)[0].replace(/^./, (c) => c.toUpperCase()));
+const risp = { y: new Date().getFullYear() };
+
+function viewRisparmi() {
+  if (!loaded.risp) return `<div class="empty">Caricamento…</div>`;
+  const tot = totale(risparmi);
+  const anno = risparmi.filter((r) => r.data.startsWith(`${risp.y}-`));
+  const totAnno = totale(anno);
+  const now = new Date();
+  const mesiAnno = risp.y === now.getFullYear() ? now.getMonth() + 1 : 12;
+  const vals = MESI_B.map((_, i) => totale(anno.filter((r) => ym(r.data) === `${risp.y}-${pad(i + 1)}`)));
+  const mx = Math.max(1, ...vals);
+  const arr = [...anno].sort((a, b) => b.data.localeCompare(a.data));
+  let lista = "", lastM = "";
+  for (const r of arr) {
+    const m = ym(r.data);
+    if (m !== lastM) {
+      const [yy, mm] = m.split("-").map(Number);
+      lista += `<div class="day-head row between"><span>${MESI[mm - 1]} ${yy}</span><span>${eur(totale(arr.filter((x) => ym(x.data) === m)))}</span></div>`;
+      lastM = m;
+    }
+    lista += `<div class="item" data-risp="${esc(r.id)}">
+      <div class="ico" style="background:var(--accent-soft)">💰</div>
+      <div class="txt"><div class="t">${esc(r.nota || "Versamento")}</div><div class="s">${fmtDate(r.data)}${r.creataDa ? " · " + esc(nomeDa(r.creataDa)) : ""}</div></div>
+      <div class="amt pos">+${eur(r.importo)}</div></div>`;
+  }
+  return `
+    <div class="card">
+      <h3>Totale versato sul conto risparmi</h3>
+      <div class="big-total">${eur(tot)}</div>
+      <div class="small muted">${risparmi.length} ${risparmi.length === 1 ? "versamento" : "versamenti"} registrati</div>
+    </div>
+    <div class="period"><button data-snav="-1">‹</button><span class="lbl">Anno ${risp.y}</span><button data-snav="1">›</button></div>
+    <div class="card">
+      <div class="kpis" style="margin-top:0">
+        <div class="kpi"><span class="small muted">Versato nel ${risp.y}</span><b>${eur(totAnno)}</b></div>
+        <div class="kpi"><span class="small muted">Media al mese</span><b>${eur(totAnno / mesiAnno)}</b></div>
+      </div>
+      <div class="months">${vals.map((v, i) => `<div class="m ${risp.y === now.getFullYear() && i === now.getMonth() ? "cur" : ""}" title="${eur(v)}"><i style="height:${(v / mx) * 100}%"></i><span>${MESI_B[i].slice(0, 1).toUpperCase()}</span></div>`).join("")}</div>
+    </div>
+    <div class="card"><h3>Versamenti ${risp.y}</h3>
+      ${lista || `<div class="empty">Nessun versamento nel ${risp.y}. Tocca + per registrarne uno.</div>`}
+    </div>`;
+}
+
+function apriVersamento(r = null) {
+  const v = r || { data: today(), importo: "", nota: "" };
+  openSheet(`
+    <h2>${r ? "Modifica versamento" : "Nuovo versamento"}</h2>
+    <p class="small muted" style="margin-top:-8px">Soldi messi sul conto risparmi.</p>
+    <input id="v-imp" class="amount-input" inputmode="decimal" placeholder="0,00 €" value="${v.importo !== "" ? String(v.importo).replace(".", ",") : ""}">
+    <div class="field"><label>Data</label><input id="v-data" type="date" value="${esc(v.data)}"></div>
+    <div class="field"><label>Nota</label><input id="v-nota" placeholder="Es. versamento mensile, tredicesima…" value="${esc(v.nota)}"></div>
+    ${r && r.creataDa ? `<p class="small muted">Registrato da ${esc(nomeDa(r.creataDa))}</p>` : ""}
+    <p id="v-err" class="error"></p>
+    <div class="actions">
+      ${r ? `<button class="btn danger" id="v-del">Elimina</button>` : `<button class="btn" id="v-cancel">Annulla</button>`}
+      <button class="btn primary" id="v-save">Salva</button>
+    </div>`);
+  if (!r) setTimeout(() => $("#v-imp").focus(), 50);
+  $("#v-cancel")?.addEventListener("click", closeSheet);
+  $("#v-del")?.addEventListener("click", async () => {
+    if (!confirm("Eliminare questo versamento?")) return;
+    await deleteDoc(doc(C_RISP, r.id));
+    closeSheet(); toast("Versamento eliminato");
+  });
+  $("#v-save").addEventListener("click", async () => {
+    const importo = num($("#v-imp").value);
+    if (!(importo > 0)) { $("#v-err").textContent = "Inserisci un importo valido"; return; }
+    const rec = { data: $("#v-data").value || today(), importo: Math.round(importo * 100) / 100, nota: $("#v-nota").value.trim() };
+    closeSheet();
+    if (r) await updateDoc(doc(C_RISP, r.id), { ...rec, modificataDa: user.email, modificataIl: serverTimestamp() });
+    else await addDoc(C_RISP, { ...rec, creataDa: user.email, creataIl: serverTimestamp() });
+    risp.y = Number(rec.data.slice(0, 4));
+    toast(r ? "Versamento aggiornato" : "Versamento registrato");
+  });
 }
 
 // ---------- Click nella vista ----------
 $("#view").addEventListener("click", (e) => {
-  const t = e.target.closest("[data-spesa],[data-paga],[data-salta],[data-cat],[data-goto],[data-fnav],[data-fmode],[data-fcat],[data-rmode],[data-rnav],[data-rcat],[data-rmese],[data-ric],#btn-new-ric");
+  const t = e.target.closest("[data-spesa],[data-paga],[data-salta],[data-cat],[data-goto],[data-fnav],[data-fmode],[data-fcat],[data-rmode],[data-rnav],[data-rcat],[data-rmese],[data-ric],[data-risp],[data-snav],#btn-new-ric");
   if (!t) return;
   const d = t.dataset;
   if (d.spesa) apriSpesa(spese.find((s) => s.id === d.spesa));
@@ -440,6 +531,8 @@ $("#view").addEventListener("click", (e) => {
   else if (d.rnav) { if (riep.mode === "mese") [riep.y, riep.m] = ymAdd(riep.y, riep.m, Number(d.rnav)); else riep.y += Number(d.rnav); render(); }
   else if (d.rmese) { riep.mode = "mese"; riep.m = Number(d.rmese); render(); }
   else if (d.rcat) { Object.assign(filtro, { y: riep.y, m: riep.mode === "mese" ? riep.m : null, cat: d.rcat }); tab = "spese"; render(); }
+  else if (d.risp) apriVersamento(risparmi.find((r) => r.id === d.risp));
+  else if (d.snav) { risp.y += Number(d.snav); render(); }
   else if (d.ric) apriRicorrente(ricorrenti.find((r) => r.id === d.ric));
   else if (t.id === "btn-new-ric") apriRicorrente();
 });
@@ -483,13 +576,14 @@ function apriSpesa(s = null, opts = {}) {
   const r = opts.ricorrente;
   const v = s || {
     data: r ? (r.prossima <= today() ? today() : r.prossima) : today(),
-    importo: r ? r.importo : "", categoria: r ? r.categoria : (filtro.cat || ""), descrizione: r ? r.nome : "",
+    importo: r && haImporto(r) ? r.importo : "", categoria: r ? r.categoria : (filtro.cat || ""), descrizione: r ? r.nome : "",
     conto: r ? r.conto : (localStorage.getItem("ultimoConto") ?? impostazioni.conti?.[0] ?? ""), note: "", consumo: "",
   };
   let cat = v.categoria;
+  const ricCollegata = r || (s && s.ricorrenteId ? ricorrenti.find((x) => x.id === s.ricorrenteId) : null);
   openSheet(`
-    <h2>${s ? "Modifica spesa" : r ? "Conferma pagamento" : "Nuova spesa"}</h2>
-    ${r ? `<p class="small muted" style="margin-top:-8px">${esc(r.nome)} · scadenza ${fmtDate(r.prossima)}. Correggi l'importo se diverso.</p>` : ""}
+    <h2>${s ? "Modifica spesa" : r ? (haImporto(r) ? "Conferma pagamento" : "Registra " + esc(r.nome)) : "Nuova spesa"}</h2>
+    ${r ? `<p class="small muted" style="margin-top:-8px">${esc(r.nome)} · previsto il ${fmtDate(r.prossima)}. ${haImporto(r) ? "Correggi l'importo se diverso." : "Inserisci l'importo della fattura."}</p>` : ""}
     <input id="f-imp" class="amount-input" inputmode="decimal" placeholder="0,00 €" value="${v.importo !== "" ? String(v.importo).replace(".", ",") : ""}">
     <div class="field"><label>Categoria</label>${catGrid(cat)}</div>
     <div class="two">
@@ -499,6 +593,7 @@ function apriSpesa(s = null, opts = {}) {
     <div class="field"><label>Descrizione</label><input id="f-desc" placeholder="Es. bolletta luce, spesa Conad…" value="${esc(v.descrizione)}"></div>
     <div class="field" id="f-cons-wrap"><label id="f-cons-lbl">Consumo (facoltativo)</label><input id="f-cons" inputmode="decimal" value="${v.consumo ? String(v.consumo).replace(".", ",") : ""}"></div>
     <div class="field"><label>Note</label><input id="f-note" value="${esc(v.note)}"></div>
+    ${ricCollegata && haImporto(ricCollegata) ? `<label class="check"><input type="checkbox" id="f-default" checked><div><b>Usa questo importo anche per i prossimi pagamenti</b><div class="small muted">Aggiorna l'importo di "${esc(ricCollegata.nome)}" (es. cambio piano o aumento di prezzo).</div></div></label>` : ""}
     <p id="f-err" class="error"></p>
     <div class="actions">
       ${s ? `<button class="btn danger" id="f-del">Elimina</button>` : `<button class="btn" id="f-cancel">Annulla</button>`}
@@ -511,7 +606,7 @@ function apriSpesa(s = null, opts = {}) {
   };
   consUpd();
   bindCatGrid((id) => { cat = id; consUpd(); });
-  if (!s) setTimeout(() => $("#f-imp").focus(), 50);
+  if (!s && !(r && haImporto(r))) setTimeout(() => $("#f-imp").focus(), 50);
   $("#f-cancel")?.addEventListener("click", closeSheet);
   $("#f-del")?.addEventListener("click", async () => {
     if (!confirm("Eliminare questa spesa?")) return;
@@ -529,14 +624,19 @@ function apriSpesa(s = null, opts = {}) {
       conto: $("#f-conto").value, note: $("#f-note").value.trim(), consumo: catById(cat).unita && cons > 0 ? cons : null,
     };
     localStorage.setItem("ultimoConto", rec.conto);
+    const nuovoDefault = $("#f-default")?.checked && ricCollegata && Number(ricCollegata.importo) !== rec.importo;
     closeSheet();
+    if (nuovoDefault && !r) {
+      await updateDoc(doc(C_RIC, ricCollegata.id), { importo: rec.importo });
+      toast(`Nuovo importo per "${ricCollegata.nome}": ${eur(rec.importo)}`);
+    }
     if (s) {
       await updateDoc(doc(C_SPESE, s.id), { ...rec, modificataDa: user.email, modificataIl: serverTimestamp() });
-      toast("Spesa aggiornata");
+      if (!nuovoDefault) toast("Spesa aggiornata");
     } else if (r) {
       const b = writeBatch(db);
       b.set(doc(C_SPESE, `ric_${r.id}_${r.prossima}`), { ...nuovaSpesaDaRicorrente(r, data, rec.importo), ...rec, ricorrenteId: r.id });
-      b.update(doc(C_RIC, r.id), { prossima: addMonths(r.prossima, r.frequenza || 1, r.giorno), ultimoImporto: rec.importo });
+      b.update(doc(C_RIC, r.id), { prossima: addMonths(r.prossima, r.frequenza || 1, r.giorno), ultimoImporto: rec.importo, ...(nuovoDefault ? { importo: rec.importo } : {}) });
       await b.commit();
       toast("Pagamento registrato");
     } else {
@@ -565,15 +665,15 @@ function apriRicorrente(r = null) {
     <h2>${r ? "Modifica ricorrente" : "Nuova spesa ricorrente"}</h2>
     <div class="field"><label>Nome</label><input id="r-nome" placeholder="Es. Bolletta luce, Netflix…" value="${esc(v.nome)}"></div>
     <div class="two">
-      <div class="field"><label>Importo (indicativo)</label><input id="r-imp" inputmode="decimal" value="${v.importo !== "" ? String(v.importo).replace(".", ",") : ""}"></div>
+      <div class="field"><label>Importo (vuoto = da fattura)</label><input id="r-imp" inputmode="decimal" placeholder="da fattura" value="${haImporto(v) ? String(v.importo).replace(".", ",") : ""}"></div>
       <div class="field"><label>Frequenza</label><select id="r-freq">${Object.entries(FREQ).map(([k, n]) => `<option value="${k}" ${Number(k) === Number(v.frequenza) ? "selected" : ""}>${n}</option>`).join("")}</select></div>
     </div>
     <div class="two">
-      <div class="field"><label>Prossima scadenza</label><input id="r-prox" type="date" value="${esc(v.prossima || today())}"></div>
+      <div class="field"><label>Prossima scadenza / arrivo</label><input id="r-prox" type="date" value="${esc(v.prossima || today())}"></div>
       <div class="field"><label>Conto</label><select id="r-conto">${contiOptions(v.conto)}</select></div>
     </div>
     <div class="field"><label>Categoria</label>${catGrid(cat)}</div>
-    <label class="check"><input type="checkbox" id="r-auto" ${v.automatica ? "checked" : ""}><div><b>Addebito automatico</b><div class="small muted">Si registra da sola alla scadenza. Se disattivo, compare in "In scadenza" e la confermi tu quando paghi.</div></div></label>
+    <label class="check"><input type="checkbox" id="r-auto" ${v.automatica ? "checked" : ""}><div><b>Addebito automatico</b><div class="small muted">Si registra da sola alla scadenza. Se disattivo, compare in "In scadenza" come promemoria e la registri tu quando arriva la fattura.</div></div></label>
     <label class="check"><input type="checkbox" id="r-attiva" ${v.attiva ? "checked" : ""}><div><b>Attiva</b><div class="small muted">Disattivala per metterla in pausa senza eliminarla.</div></div></label>
     <div class="field"><label>Note</label><input id="r-note" value="${esc(v.note || "")}"></div>
     <p id="r-err" class="error"></p>
@@ -590,14 +690,16 @@ function apriRicorrente(r = null) {
   });
   $("#r-save").addEventListener("click", async () => {
     const nome = $("#r-nome").value.trim();
-    const importo = num($("#r-imp").value);
+    const impTxt = $("#r-imp").value.trim();
+    const importo = impTxt ? num(impTxt) : null;
     const prossima = $("#r-prox").value;
     if (!nome) { $("#r-err").textContent = "Inserisci un nome"; return; }
-    if (!(importo >= 0)) { $("#r-err").textContent = "Importo non valido"; return; }
+    if (importo !== null && !(importo >= 0)) { $("#r-err").textContent = "Importo non valido"; return; }
+    if (importo === null && $("#r-auto").checked) { $("#r-err").textContent = "Per l'addebito automatico serve un importo"; return; }
     if (!cat) { $("#r-err").textContent = "Scegli una categoria"; return; }
     if (!prossima) { $("#r-err").textContent = "Indica la prossima scadenza"; return; }
     const rec = {
-      nome, importo: Math.round(importo * 100) / 100, frequenza: Number($("#r-freq").value), prossima, giorno: parseIso(prossima).getDate(),
+      nome, importo: importo === null ? null : Math.round(importo * 100) / 100, frequenza: Number($("#r-freq").value), prossima, giorno: parseIso(prossima).getDate(),
       categoria: cat, automatica: $("#r-auto").checked, attiva: $("#r-attiva").checked, conto: $("#r-conto").value, note: $("#r-note").value.trim(),
     };
     closeSheet();
@@ -729,6 +831,13 @@ async function esportaExcel() {
   ws["!cols"] = [{ wch: 11 }, { wch: 20 }, { wch: 34 }, { wch: 10 }, { wch: 10 }, { wch: 9 }, { wch: 6 }, { wch: 24 }, { wch: 10 }];
   for (let i = 2; i <= rows.length + 1; i++) { if (ws["A" + i]) ws["A" + i].z = "dd/mm/yyyy"; if (ws["D" + i]) ws["D" + i].z = "#,##0.00 €"; }
   XLSX.utils.book_append_sheet(wb, ws, "Spese");
+  if (risparmi.length) {
+    const rr = [...risparmi].sort((a, b) => a.data.localeCompare(b.data)).map((r) => ({ Data: parseIso(r.data), Importo: Number(r.importo) || 0, Nota: r.nota || "", "Registrato da": nomeDa(r.creataDa) }));
+    const wr = XLSX.utils.json_to_sheet(rr, { cellDates: true });
+    wr["!cols"] = [{ wch: 11 }, { wch: 11 }, { wch: 34 }, { wch: 14 }];
+    for (let i = 2; i <= rr.length + 1; i++) { if (wr["A" + i]) wr["A" + i].z = "dd/mm/yyyy"; if (wr["B" + i]) wr["B" + i].z = "#,##0.00 €"; }
+    XLSX.utils.book_append_sheet(wb, wr, "Risparmi");
+  }
   // Riepilogo anno x categoria x mese
   const anni = [...new Set(spese.map((s) => s.data.slice(0, 4)))].sort();
   for (const a of anni) {
