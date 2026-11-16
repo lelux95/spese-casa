@@ -1,4 +1,5 @@
 name: Pubblica web app
+# Pubblica la cartella web/ su GitHub Pages
 
 on:
   push:
